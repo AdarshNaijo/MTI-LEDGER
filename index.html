@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MTI Ledger Pro</title>
     
+    <link rel="manifest" href="manifest.json">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#1e3a8a">
     <link rel="icon" type="image/png" href="icon.png">
     <link rel="apple-touch-icon" href="icon.png">
 
@@ -22,7 +24,7 @@
         @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         .card { background: var(--card); padding: 22px; border-radius: 20px; box-shadow: 0 8px 30px rgba(0,0,0,0.06); margin-bottom: 15px; position: relative; }
         input, select, textarea { width: 100%; padding: 14px; border: 1.5px solid #e2e8f0; border-radius: 12px; margin-bottom: 12px; background: var(--card); color: var(--text); box-sizing: border-box; font-size: 16px; outline: none; }
-        button { width: 100%; padding: 16px; border-radius: 14px; border: none; font-weight: bold; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+        button { width: 100%; padding: 16px; border-radius: 14px; border: none; font-weight: bold; cursor: pointer; }
         .btn-p { background: var(--primary); color: white; }
         .btn-o { background: none; border: 1.5px solid var(--primary); color: var(--primary); width: 85px; padding: 8px; font-size: 10px; position: absolute; top: 20px; right: 20px; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -30,7 +32,6 @@
         .edit-btn { background: #e0f2fe; color: #0369a1; padding: 6px 10px; border-radius: 8px; border: none; margin-right: 8px; font-size: 11px; }
         .del-btn { color: #ef4444; background: none; border: none; font-weight: bold; font-size: 14px; }
         .total-box { text-align: right; font-weight: 800; padding: 15px 5px; color: var(--primary); font-size: 20px; border-top: 3px solid var(--primary); margin-top: 15px; }
-        .status-dot { height: 8px; width: 8px; background-color: var(--accent); border-radius: 50%; display: inline-block; margin-right: 5px; }
     </style>
 </head>
 <body>
@@ -51,9 +52,6 @@
             </select>
             <textarea id="logInput" rows="3" placeholder="L, G (one per line)"></textarea>
             <button class="btn-p" onclick="saveData()">Save Entry</button>
-            <p style="font-size: 0.65rem; color: #999; margin-top: 15px; text-align: center;">
-                <span class="status-dot"></span> Offline Storage Active
-            </p>
         </div>
         <div id="activeList" class="card" style="display:none;"></div>
     </div>
@@ -84,9 +82,13 @@
     </nav>
 
 <script>
-// IMPORTANT: REPLACE WITH YOUR DEPLOYED APPS SCRIPT URL
-const DRIVE_URL = "YOUR_APPS_SCRIPT_URL_HERE";
+// 1. REGISTER SERVICE WORKER
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('service-worker.js');
+}
 
+// 2. APP LOGIC
+const DRIVE_URL = "YOUR_APPS_SCRIPT_URL_HERE";
 let activeLogs = JSON.parse(localStorage.getItem('mti_logs')) || [];
 let archiveLogs = [];
 let mutexLock = false; 
@@ -101,9 +103,7 @@ function showView(v) {
 
 function getToday() {
     const d = new Date();
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    return `${day}/${month}/${d.getFullYear()}`;
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 }
 
 function saveData() {
@@ -157,7 +157,7 @@ function editEntry(id) {
 }
 
 function deleteEntry(id) {
-    if(!confirm("Permanently delete this entry?")) return;
+    if(!confirm("Permanently delete?")) return;
     activeLogs = activeLogs.filter(i => i.id !== id);
     localStorage.setItem('mti_logs', JSON.stringify(activeLogs));
     renderActive();
@@ -171,50 +171,45 @@ async function autoSync() {
             if (b.level < 0.10 && !b.charging) return; 
         }
     } catch (e) {}
-
     const now = new Date();
     const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     const currentP = months[now.getMonth()] + "_" + now.getFullYear();
     const lastP = localStorage.getItem('last_sync_tag') || currentP;
-
     if (lastP !== currentP && activeLogs.length > 0) {
         mutexLock = true;
         const [m, y] = lastP.split('_');
         let table = "No.\tCust\tType\tL\tG\tVol\tDate\n" + "=".repeat(65) + "\n";
         activeLogs.forEach((i, idx) => table += `${idx+1}\t${i.cName}\t${i.wType}\t${i.l}\t${i.g}\t${i.vol}\t${i.date}\n`);
-        
         try {
             const res = await fetch(DRIVE_URL, { method: 'POST', body: JSON.stringify({ year:y, month:m, fullTable:table }) });
             if ((await res.text()) === "SUCCESS") {
                 localStorage.removeItem('mti_logs');
                 localStorage.setItem('last_sync_tag', currentP);
-                alert(`Sync Complete: ${m} ${y} data archived to Drive.`);
+                alert("Auto-Sync Complete!");
                 location.reload();
             }
-        } catch(e) { console.warn("Sync deferred."); }
+        } catch(e) {}
         mutexLock = false;
-    } else {
-        localStorage.setItem('last_sync_tag', currentP);
-    }
+    } else { localStorage.setItem('last_sync_tag', currentP); }
 }
 
 async function fetchArchive() {
     const y = document.getElementById('fYear').value;
     const m = document.getElementById('fMonth').value;
     const list = document.getElementById('historyList');
-    list.innerHTML = "<p style='text-align:center;'>Searching Cloud...</p>";
+    list.innerHTML = "Fetching Cloud Data...";
     list.style.display = 'block';
     try {
         const res = await fetch(`${DRIVE_URL}?year=${y}&month=${m}`);
         const text = await res.text();
-        if(text === "NOT_FOUND") return list.innerHTML = "<p style='color:red; text-align:center;'>No record exists.</p>";
+        if(text === "NOT_FOUND") return list.innerHTML = "No record found.";
         archiveLogs = [];
         text.split('\n').slice(2).forEach(line => {
             const p = line.split('\t');
             if(p.length >= 7) archiveLogs.push({ cName:p[1], wType:p[2], l:p[3], g:p[4], vol:p[5], date:p[6] });
         });
         renderHistory();
-    } catch(e) { list.innerHTML = "<p style='color:orange; text-align:center;'>Connection error.</p>"; }
+    } catch(e) {}
 }
 
 function renderHistory() {
@@ -222,20 +217,14 @@ function renderHistory() {
     const dIn = document.getElementById('fDate').value;
     const fmtD = dIn ? dIn.split('-').reverse().join('/') : "";
     const src = archiveLogs.length ? archiveLogs : activeLogs;
-    
-    const flt = src.filter(i => {
-        const match = i.cName.toLowerCase().includes(q) || i.wType.toLowerCase().includes(q);
-        const dateMatch = !fmtD || i.date === fmtD;
-        return match && dateMatch;
-    });
-    
+    const flt = src.filter(i => (i.cName.toLowerCase().includes(q) || i.wType.toLowerCase().includes(q)) && (!fmtD || i.date === fmtD));
     let h = '<table><tr><th>No.</th><th>Cstmr</th><th>Type</th><th>Vol</th><th>Date</th></tr>';
     let sum = 0;
     flt.forEach((i, idx) => {
         h += `<tr><td>${idx+1}</td><td>${i.cName}</td><td>${i.wType}</td><td>${i.vol}</td><td>${i.date}</td></tr>`;
         sum += parseFloat(i.vol);
     });
-    document.getElementById('historyList').innerHTML = h + `</table><div class="total-box">Total Volume: ${sum.toFixed(3)} ft³</div>`;
+    document.getElementById('historyList').innerHTML = h + `</table><div class="total-box">Total: ${sum.toFixed(3)} ft³</div>`;
 }
 
 function toggleTheme() {
