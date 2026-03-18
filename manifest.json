@@ -1,15 +1,21 @@
 {
-  "name": "Menachery Timber Industries",
-  "short_name": "MTI Calc",
-  "start_url": "./index.html",
-  "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#1e3a8a",
+  "short_name": "MTI Ledger",
+  "name": "Menachery Timber Industries Ledger",
   "icons": [
     {
-      "src": "./icon.png",
-      "sizes": "512x512",
-      "type": "image/png"
+      "src": "icon.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "icon.png",
+      "type": "image/png",
+      "sizes": "512x512"
     }
-  ]
+  ],
+  "start_url": "index.html",
+  "background_color": "#f4f7f9",
+  "display": "standalone",
+  "scope": "./",
+  "theme_color": "#1e3a8a"
 }
