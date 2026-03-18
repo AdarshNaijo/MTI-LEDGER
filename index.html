@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MTI Ledger Pro</title>
+    <style>
+        :root { --bg: #f4f7f9; --card: #ffffff; --text: #333; --primary: #1e3a8a; --accent: #10b981; }
+        [data-theme="dark"] { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --primary: #3b82f6; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding-bottom: 80px; transition: 0.3s; }
+        .nav-bar { position: fixed; bottom: 0; width: 100%; background: var(--card); display: flex; border-top: 1px solid rgba(0,0,0,0.1); height: 65px; z-index: 1000; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); }
+        .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11px; opacity: 0.5; cursor: pointer; }
+        .nav-item.active { opacity: 1; color: var(--primary); font-weight: bold; }
+        .view { display: none; padding: 15px; max-width: 600px; margin: auto; animation: slideIn 0.2s ease; }
+        .view.active { display: block; }
+        @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .card { background: var(--card); padding: 22px; border-radius: 20px; box-shadow: 0 8px 30px rgba(0,0,0,0.06); margin-bottom: 15px; position: relative; }
+        input, select, textarea { width: 100%; padding: 14px; border: 1.5px solid #e2e8f0; border-radius: 12px; margin-bottom: 12px; background: var(--card); color: var(--text); box-sizing: border-box; font-size: 16px; outline: none; }
+        button { width: 100%; padding: 16px; border-radius: 14px; border: none; font-weight: bold; cursor: pointer; transition: 0.1s; }
+        .btn-p { background: var(--primary); color: white; }
+        .btn-o { background: none; border: 1.5px solid var(--primary); color: var(--primary); width: 85px; padding: 8px; font-size: 10px; position: absolute; top: 20px; right: 20px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 12px 10px; border-bottom: 1px solid rgba(0,0,0,0.05); text-align: left; }
+        .edit-btn { background: #e0f2fe; color: #0369a1; padding: 6px 10px; border-radius: 8px; border: none; margin-right: 8px; font-size: 11px; }
+        .del-btn { color: #ef4444; background: none; border: none; font-weight: bold; font-size: 14px; }
+        .total-box { text-align: right; font-weight: 800; padding: 15px 5px; color: var(--primary); font-size: 20px; border-top: 3px solid var(--primary); margin-top: 15px; }
+    </style>
+</head>
+<body>
+    <div id="calcView" class="view active">
+        <div class="card">
+            <button onclick="toggleTheme()" class="btn-o">🌙 Theme</button>
+            <h2 style="color:var(--primary); margin:0 0 20px 0;">MTI Ledger</h2>
+            <input type="text" id="cName" placeholder="Customer Name">
+            <select id="wType"><option value="Teak 🪵">Teak 🪵</option><option value="Mahogany 🌳">Mahogany 🌳</option><option value="Jackfruit 🌳">Jackfruit 🌳</option></select>
+            <textarea id="logInput" rows="3" placeholder="L, G (one per line)"></textarea>
+            <button class="btn-p" onclick="saveData()">Save Entry</button>
+        </div>
+        <div id="activeList" class="card" style="display:none;"></div>
+    </div>
+    <div id="filterView" class="view">
+        <div class="card">
+            <h3 style="margin:0 0 15px 0;">📂 Archives</h3>
+            <div style="display:flex; gap:10px; margin-bottom:15px;">
+                <select id="fYear" style="flex:1;"><option value="2026">2026</option></select>
+                <select id="fMonth" style="flex:1;">
+                    <option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option>
+                    <option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option>
+                </select>
+            </div>
+            <button class="btn-p" onclick="fetchArchive()" style="background:var(--accent);">Load Month</button>
+            <hr style="margin:25px 0; opacity:0.1;">
+            <input type="date" id="fDate" onchange="renderHistory()">
+            <input type="text" id="fSearch" onkeyup="renderHistory()" placeholder="Search Name/Wood...">
+        </div>
+        <div id="historyList" class="card" style="display:none;"></div>
+    </div>
+    <nav class="nav-bar">
+        <div class="nav-item active" id="navCalc" onclick="showView('calc')">🔢<br>Calc</div>
+        <div class="nav-item" id="navFilter" onclick="showView('filter')">📁<br>History</div>
+    </nav>
+<script>
+const DRIVE_URL = "https://script.google.com/macros/s/AKfycbzW-ascenNkugRRITnnDW1qV4F1y41BTvn_5dFSVVCerIB7Mc7MPppLoMLIfSj58RlHHw/exec";
+let activeLogs = JSON.parse(localStorage.getItem('mti_logs')) || [];
+let archiveLogs = [];
+let mutexLock = false; 
+
+window.onload = () => { renderActive(); autoSync(); };
+
+function showView(v) {
+    document.querySelectorAll('.view, .nav-item').forEach(e => e.classList.remove('active'));
+    document.getElementById(v + 'View').classList.add('active');
+    document.getElementById('nav' + v.charAt(0).toUpperCase() + v.slice(1)).classList.add('active');
+}
+
+function getToday() {
+    const d = new Date();
+    return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+}
+
+function saveData() {
+    if(mutexLock) return;
+    const raw = document.getElementById('logInput').value.trim();
+    if(!raw) return;
+    const cName = document.getElementById('cName').value.trim() || "Counter Sale";
+    const wType = document.getElementById('wType').value;
+    const date = getToday();
+    raw.split('\n').filter(l => l.trim()).forEach(l => {
+        const v = l.replace(/[^0-9.,\s]/g, '').replace(/,/g, ' ').split(/\s+/).filter(x => x);
+        if(v.length >= 2) {
+            let vol = (parseFloat(v[0]) * Math.pow(parseFloat(v[1]), 2)) / 2304;
+            activeLogs.unshift({ cName, wType, l:v[0], g:v[1], vol:vol.toFixed(3), date, id: Date.now() + Math.random() });
+        }
+    });
+    localStorage.setItem('mti_logs', JSON.stringify(activeLogs));
+    document.getElementById('logInput').value = "";
+    renderActive();
+}
+
+function renderActive() {
+    const area = document.getElementById('activeList');
+    if(!activeLogs.length) return area.style.display='none';
+    area.style.display='block';
+    const today = getToday();
+    let h = '<h4>Active Ledger</h4><table><tr><th>No.</th><th>Cstmr</th><th>Vol</th><th>Action</th></tr>';
+    activeLogs.forEach((i, idx) => {
+        const edit = i.date === today ? `<button class="edit-btn" onclick="editEntry(${i.id})">✎</button>` : "";
+        h += `<tr><td>${idx+1}</td><td>${i.cName}</td><td>${i.vol}</td><td>${edit}<button class="del-btn" onclick="deleteEntry(${i.id})">✕</button></td></tr>`;
+    });
+    area.innerHTML = h + '</table>';
+}
+
+function editEntry(id) {
+    const item = activeLogs.find(i => i.id === id);
+    if(!item) return;
+    document.getElementById('cName').value = item.cName;
+    document.getElementById('wType').value = item.wType;
+    document.getElementById('logInput').value = `${item.l}, ${item.g}`;
+    activeLogs = activeLogs.filter(i => i.id !== id);
+    localStorage.setItem('mti_logs', JSON.stringify(activeLogs));
+    renderActive();
+}
+
+function deleteEntry(id) {
+    if(!confirm("Delete?")) return;
+    activeLogs = activeLogs.filter(i => i.id !== id);
+    localStorage.setItem('mti_logs', JSON.stringify(activeLogs));
+    renderActive();
+}
+
+async function autoSync() {
+    if (mutexLock) return;
+    try {
+        if ('getBattery' in navigator) {
+            const b = await navigator.getBattery();
+            if (b.level < 0.10 && !b.charging) return; 
+        }
+    } catch (e) {}
+    const now = new Date();
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const currentP = months[now.getMonth()] + "_" + now.getFullYear();
+    const lastP = localStorage.getItem('last_sync_tag') || currentP;
+    if (lastP !== currentP && activeLogs.length > 0) {
+        mutexLock = true;
+        const [m, y] = lastP.split('_');
+        let table = "No.\tCust\tType\tL\tG\tVol\tDate\n" + "=".repeat(65) + "\n";
+        activeLogs.forEach((i, idx) => table += `${idx+1}\t${i.cName}\t${i.wType}\t${i.l}\t${i.g}\t${i.vol}\t${i.date}\n`);
+        try {
+            const res = await fetch(DRIVE_URL, { method: 'POST', body: JSON.stringify({ year:y, month:m, fullTable:table }) });
+            if ((await res.text()) === "SUCCESS") {
+                localStorage.removeItem('mti_logs');
+                localStorage.setItem('last_sync_tag', currentP);
+                alert("Auto-Sync Complete!");
+                location.reload();
+            }
+        } catch(e) {}
+        mutexLock = false;
+    } else { localStorage.setItem('last_sync_tag', currentP); }
+}
+
+async function fetchArchive() {
+    const y = document.getElementById('fYear').value;
+    const m = document.getElementById('fMonth').value;
+    const list = document.getElementById('historyList');
+    list.innerHTML = "Fetching...";
+    list.style.display = 'block';
+    try {
+        const res = await fetch(`${DRIVE_URL}?year=${y}&month=${m}`);
+        const text = await res.text();
+        if(text === "NOT_FOUND") return list.innerHTML = "Not found.";
+        archiveLogs = [];
+        text.split('\n').slice(2).forEach(line => {
+            const p = line.split('\t');
+            if(p.length >= 7) archiveLogs.push({ cName:p[1], wType:p[2], l:p[3], g:p[4], vol:p[5], date:p[6] });
+        });
+        renderHistory();
+    } catch(e) {}
+}
+
+function renderHistory() {
+    const q = document.getElementById('fSearch').value.toLowerCase();
+    const dIn = document.getElementById('fDate').value;
+    const fmtD = dIn ? dIn.split('-').reverse().join('/') : "";
+    const src = archiveLogs.length ? archiveLogs : activeLogs;
+    const flt = src.filter(i => i.cName.toLowerCase().includes(q) && (!fmtD || i.date === fmtD));
+    let h = '<table><tr><th>No.</th><th>Cstmr</th><th>Type</th><th>Vol</th><th>Date</th></tr>';
+    let sum = 0;
+    flt.forEach((i, idx) => {
+        h += `<tr><td>${idx+1}</td><td>${i.cName}</td><td>${i.wType}</td><td>${i.vol}</td><td>${i.date}</td></tr>`;
+        sum += parseFloat(i.vol);
+    });
+    document.getElementById('historyList').innerHTML = h + `</table><div class="total-box">Total: ${sum.toFixed(3)}</div>`;
+}
+
+function toggleTheme() {
+    const cur = document.documentElement.getAttribute('data-theme');
+    document.documentElement.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+}
+</script>
+</body>
+</html>
