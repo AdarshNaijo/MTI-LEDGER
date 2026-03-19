@@ -22,14 +22,14 @@
         .view { display: none; padding: 15px; max-width: 600px; margin: auto; animation: slideIn 0.2s ease; }
         .view.active { display: block; }
         @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-        .card { background: var(--card); padding: 20px; border-radius: 20px; box-shadow: 0 8px 30px rgba(0,0,0,0.06); margin-bottom: 15px; position: relative; }
+        .card { background: var(--card); padding: 22px; border-radius: 20px; box-shadow: 0 8px 30px rgba(0,0,0,0.06); margin-bottom: 15px; position: relative; }
         input, select, textarea { width: 100%; padding: 14px; border: 1.5px solid #e2e8f0; border-radius: 12px; margin-bottom: 12px; background: var(--card); color: var(--text); box-sizing: border-box; font-size: 16px; outline: none; }
         button { width: 100%; padding: 16px; border-radius: 14px; border: none; font-weight: bold; cursor: pointer; }
         .btn-p { background: var(--primary); color: white; }
         .btn-o { background: none; border: 1.5px solid var(--primary); color: var(--primary); width: 85px; padding: 8px; font-size: 10px; position: absolute; top: 20px; right: 20px; }
         table { width: 100%; border-collapse: collapse; font-size: 12px; }
         th, td { padding: 10px 5px; border-bottom: 1px solid rgba(0,0,0,0.05); text-align: left; }
-        .dim-text { color: #666; font-size: 10px; display: block; }
+        .dim-sub { color: #666; font-size: 10px; display: block; }
         .edit-btn { background: #e0f2fe; color: #0369a1; padding: 6px 10px; border-radius: 8px; border: none; margin-right: 8px; font-size: 11px; }
         .del-btn { color: #ef4444; background: none; border: none; font-weight: bold; font-size: 14px; }
         .total-box { text-align: right; font-weight: 800; padding: 15px 5px; color: var(--primary); font-size: 20px; border-top: 3px solid var(--primary); margin-top: 15px; }
@@ -78,7 +78,7 @@
     </div>
 
     <nav class="nav-bar">
-        <div class="nav-item active" id="navCalc" onclick="showView('calc')">🔢<br>Calculator</div>
+        <div class="nav-item active" id="navCalc" onclick="showView('calc')">🔢<br>Calc</div>
         <div class="nav-item" id="navFilter" onclick="showView('filter')">📁<br>Archives</div>
     </nav>
 
@@ -87,7 +87,7 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('service-wo
 
 const DRIVE_URL = "YOUR_APPS_SCRIPT_URL_HERE";
 let activeLogs = JSON.parse(localStorage.getItem('mti_logs')) || [];
-let archiveLogs = [];
+let archiveLogs = null; // null = viewing local, array = viewing cloud
 let mutexLock = false; 
 
 window.onload = () => { renderActive(); autoSync(); };
@@ -133,7 +133,7 @@ function renderActive() {
     if(!activeLogs.length) return area.style.display='none';
     area.style.display='block';
     const today = getToday();
-    let h = '<h4>Current Ledger</h4><table><tr><th>No.</th><th>Cstmr</th><th>Dim (L,G)</th><th>Vol</th><th>Action</th></tr>';
+    let h = '<h4>Active Batch</h4><table><tr><th>No.</th><th>Cstmr</th><th>Dim(L,G)</th><th>Vol</th><th>Action</th></tr>';
     activeLogs.forEach((i, idx) => {
         const edit = i.date === today ? `<button class="edit-btn" onclick="editEntry(${i.id})">✎</button>` : "";
         h += `<tr><td>${idx+1}</td><td>${i.cName}</td><td>${i.l}, ${i.g}</td><td>${i.vol}</td><td>${edit}<button class="del-btn" onclick="deleteEntry(${i.id})">✕</button></td></tr>`;
@@ -194,16 +194,19 @@ async function fetchArchive() {
     const y = document.getElementById('fYear').value;
     const m = document.getElementById('fMonth').value;
     const list = document.getElementById('historyList');
-    list.innerHTML = "Fetching Cloud Data...";
+    list.innerHTML = "<p style='text-align:center;'>Searching Cloud...</p>";
     list.style.display = 'block';
-    
-    // RESET LOCAL DATE FILTER ON CLOUD FETCH
     document.getElementById('fDate').value = ""; 
 
     try {
         const res = await fetch(`${DRIVE_URL}?year=${y}&month=${m}`);
         const text = await res.text();
-        if(text === "NOT_FOUND") return list.innerHTML = "No record found.";
+        if(text === "NOT_FOUND") {
+            archiveLogs = null;
+            list.innerHTML = `<p style='color:#ef4444; text-align:center;'>⚠️ No record in cloud for ${m} ${y}.</p>`;
+            renderHistory();
+            return;
+        }
         archiveLogs = [];
         text.split('\n').slice(2).forEach(line => {
             const p = line.split('\t');
@@ -217,20 +220,18 @@ function renderHistory() {
     const q = document.getElementById('fSearch').value.toLowerCase();
     const dIn = document.getElementById('fDate').value;
     const fmtD = dIn ? dIn.split('-').reverse().join('/') : "";
+    const src = (archiveLogs !== null) ? archiveLogs : activeLogs;
+    const flt = src.filter(i => (i.cName.toLowerCase().includes(q) || i.wType.toLowerCase().includes(q)) && (!fmtD || i.date === fmtD));
     
-    // If we have cloud data, use it; otherwise use local active logs
-    const src = archiveLogs.length > 0 ? archiveLogs : activeLogs;
-    
-    const flt = src.filter(i => {
-        const match = i.cName.toLowerCase().includes(q) || i.wType.toLowerCase().includes(q);
-        const dateMatch = !fmtD || i.date === fmtD;
-        return match && dateMatch;
-    });
-    
-    let h = '<table><tr><th>No.</th><th>Cstmr</th><th>Dim</th><th>Vol</th><th>Date</th></tr>';
+    if (flt.length === 0) {
+        document.getElementById('historyList').innerHTML = "<p style='text-align:center; padding:20px; opacity:0.6;'>No results found.</p>";
+        return;
+    }
+
+    let h = '<table><tr><th>No.</th><th>Cstmr</th><th>Dim(L,G)</th><th>Vol</th><th>Date</th></tr>';
     let sum = 0;
     flt.forEach((i, idx) => {
-        h += `<tr><td>${idx+1}</td><td>${i.cName}</td><td><span class="dim-text">${i.l}, ${i.g}</span></td><td>${i.vol}</td><td>${i.date}</td></tr>`;
+        h += `<tr><td>${idx+1}</td><td>${i.cName}</td><td><span class="dim-sub">${i.l}, ${i.g}</span></td><td>${i.vol}</td><td>${i.date}</td></tr>`;
         sum += parseFloat(i.vol);
     });
     document.getElementById('historyList').innerHTML = h + `</table><div class="total-box">Total: ${sum.toFixed(3)} ft³</div>`;
